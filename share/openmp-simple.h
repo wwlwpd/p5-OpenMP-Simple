@@ -173,6 +173,146 @@ void PerlOMP_1D_Array_TO_1D_INT_ARRAY_r(SV *AVref, int numElements, int retArray
   }
 }
 
+/* 1D Array reference to 1D C string array ...
+ * Converts a Perl array of strings, e.g.,
+ *
+ *   my $Aref = [ "hello", "world", "foo", "bar" ];
+ *
+ * into a C array of strings (char*), so it can be used in OpenMP or C code.
+ */
+    
+void PerlOMP_1D_Array_TO_1D_STRING_ARRAY(SV *AVref, int numElements, char *retArray[numElements]) {
+  AV *array = (AV*)SvRV(AVref);
+  SV **element;
+  for (int i = 0; i < numElements; i++) {
+    element = av_fetch(array, i, 0);
+    if (!element || !*element || !SvOK(*element))
+      croak("Expected value at array[%d]", i);
+    
+    retArray[i] = strdup(SvPV_nolen(*element)); // Allocate and copy string
+    if (!retArray[i])
+      croak("Memory allocation failed for array[%d]", i);
+  }
+} 
+  
+/* Threaded version */
+void PerlOMP_1D_Array_TO_1D_STRING_ARRAY_r(SV *AVref, int numElements, char *retArray[numElements]) {
+  AV *array = (AV*)SvRV(AVref);
+  SV **element;
+  PerlOMP_GETENV_BASIC
+  #pragma omp parallel for
+  for (int i = 0; i < numElements; i++) {
+    element = av_fetch(array, i, 0);
+    if (!element || !*element || !SvOK(*element))
+      croak("Expected value at array[%d]", i);
+
+    retArray[i] = strdup(SvPV_nolen(*element)); // Allocate and copy string
+    if (!retArray[i])
+      croak("Memory allocation failed for array[%d]", i);
+  }
+}
+
+/* 1D Array reference to 1D C mixed array ...
+ * Converts a Perl array of mixeds, e.g.,
+ *
+ *   my $Aref = [ 42, 3.14, "hello", "world", 7 ];
+ *
+ * into a C array of mixeds (char*), so it can be used in OpenMP or C code.
+ */
+
+/* Convert a 1D Perl array reference into a void* array for mixed types */
+void PerlOMP_1D_Array_TO_1D_MIXED_ARRAY(
+    SV *AVref, int numElements, 
+    void *dataArray[numElements], 
+    char typeArray[numElements]
+) {
+    AV *array = (AV*)SvRV(AVref);
+    SV **element;
+
+    for (int i = 0; i < numElements; i++) {
+        element = av_fetch(array, i, 0);
+        if (!element || !*element || !SvOK(*element))
+            croak("Expected value at array[%d]", i);
+
+        if (SvIOK(*element)) {
+            int *intVal = malloc(sizeof(int));
+            if (!intVal) croak("Memory allocation failed for int at array[%d]", i);
+            *intVal = SvIV(*element);
+            dataArray[i] = intVal;
+            typeArray[i] = 'i';
+        } 
+        else if (SvNOK(*element)) {
+            double *doubleVal = malloc(sizeof(double));
+            if (!doubleVal) croak("Memory allocation failed for double at array[%d]", i);
+            *doubleVal = SvNV(*element);
+            dataArray[i] = doubleVal;
+            typeArray[i] = 'd';
+        } 
+        else if (SvPOK(*element)) {
+            char *strVal = strdup(SvPV_nolen(*element));
+            if (!strVal) croak("Memory allocation failed for string at array[%d]", i);
+            dataArray[i] = strVal;
+            typeArray[i] = 's';
+        } 
+        else {
+            croak("Unsupported data type at array[%d]", i);
+        }
+    }
+}
+
+/* Parallelized version using OpenMP */
+void PerlOMP_1D_Array_TO_1D_MIXED_ARRAY_r(
+    SV *AVref, int numElements, 
+    void *dataArray[numElements], 
+    char typeArray[numElements]
+) {
+    AV *array = (AV*)SvRV(AVref);
+    SV **element;
+    PerlOMP_GETENV_BASIC
+
+    #pragma omp parallel for
+    for (int i = 0; i < numElements; i++) {
+        element = av_fetch(array, i, 0);
+        if (!element || !*element || !SvOK(*element))
+            croak("Expected value at array[%d]", i);
+
+        if (SvIOK(*element)) {
+            int *intVal = malloc(sizeof(int));
+            if (!intVal) croak("Memory allocation failed for int at array[%d]", i);
+            *intVal = SvIV(*element);
+            dataArray[i] = intVal;
+            typeArray[i] = 'i';
+        } 
+        else if (SvNOK(*element)) {
+            double *doubleVal = malloc(sizeof(double));
+            if (!doubleVal) croak("Memory allocation failed for double at array[%d]", i);
+            *doubleVal = SvNV(*element);
+            dataArray[i] = doubleVal;
+            typeArray[i] = 'd';
+        } 
+        else if (SvPOK(*element)) {
+            char *strVal = strdup(SvPV_nolen(*element));
+            if (!strVal) croak("Memory allocation failed for string at array[%d]", i);
+            dataArray[i] = strVal;
+            typeArray[i] = 's';
+        } 
+        else {
+            croak("Unsupported data type at array[%d]", i);
+        }
+    }
+}
+
+/* Free allocated memory */
+void PerlOMP_Free_Mixed_Void_Array(int numElements, void *dataArray[numElements], char typeArray[numElements]) {
+    for (int i = 0; i < numElements; i++) {
+        if (typeArray[i] == 'i' || typeArray[i] == 'd') {
+            free(dataArray[i]); // Free allocated int/double memory
+        } else if (typeArray[i] == 's') {
+            free((char*)dataArray[i]); // Free allocated string memory
+        }
+    }
+}
+
 /* 2D AoA to 2D float C array ...
  * Convert a regular MxN Perl array of arrays (AoA) consisting of floating point values, e.g.,
  *
